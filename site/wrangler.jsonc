@@ -11,8 +11,7 @@
     {
       "binding": "DB",
       "database_name": "exomachina-waitlist",
-      // replace with id from `wrangler d1 create exomachina-waitlist`
-      "database_id": "00000000-0000-0000-0000-000000000000"
+      "database_id": "c3153ba8-1cc1-4570-b6b3-d6e37dbf17eb"
     }
   ]
   // Enable once exomachina.si is a Cloudflare zone:
