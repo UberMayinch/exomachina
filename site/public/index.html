@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>exomachina</title>
+<meta name="description" content="A jam partner that grows with you. Open-weights, local-first, and yours.">
+<style>
+  body { max-width: 38rem; margin: 3rem auto; padding: 0 16px; font: 17px/1.55 Georgia, serif; color: #111; background: #fff; }
+  @media (prefers-color-scheme: dark) { body { color: #e8e8e8; background: #111; } a { color: #9cf; } }
+  input, select, button { font: inherit; padding: .35rem .5rem; }
+  input[type=email] { width: 16rem; max-width: 100%; }
+  .hp { position: absolute; left: -9999px; }
+  #msg { min-height: 1.5em; }
+</style>
+</head>
+<body>
+<h1>exomachina</h1>
+<p>A jam partner that grows with you.</p>
+<p>We are building a creative harness that runs an open-weights model on a server you control. It keeps learning from your own work.</p>
+<p>Your work is your property. We're building it so that your work stays yours: it is never used to train anyone else's model, and it never leaves your vault without your say.</p>
+
+<h2>What we're building</h2>
+<ul>
+  <li><b>Vault</b>: encrypted storage with post-quantum key exchange and keys that you hold.</li>
+  <li><b>Model</b>: open weights, served from local or dedicated hardware.</li>
+  <li><b>Growth</b>: continual post-training on your context, so the model improves the longer you play with it.</li>
+  <li><b>Language</b>: musicians, painters and writers each get their own way of talking to the machine.</li>
+</ul>
+
+<h2>Waitlist</h2>
+<form id="wl" action="/api/waitlist" method="post">
+  <input type="email" name="email" placeholder="you@studio.art" required autocomplete="email">
+  <select name="medium" aria-label="Your medium">
+    <option value="">medium</option>
+    <option value="music">music</option>
+    <option value="visual">visual</option>
+    <option value="writing">writing</option>
+    <option value="film">film</option>
+    <option value="other">other</option>
+  </select>
+  <input class="hp" type="text" name="website" tabindex="-1" autocomplete="off" aria-hidden="true">
+  <button type="submit">Join</button>
+</form>
+<p id="msg" aria-live="polite"></p>
+<p><small>We store only your email and medium. We use no trackers and no analytics.</small></p>
+
+<p>A <a href="https://thinkinghumans.world">Thinking Humans</a> project.</p>
+
+<script>
+  const f = document.getElementById("wl"), m = document.getElementById("msg");
+  f.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    m.textContent = "…";
+    try {
+      const r = await fetch(f.action, { method: "POST", body: new FormData(f) });
+      const j = await r.json();
+      m.textContent = j.ok ? "You're on the list." : (j.error || "Something broke.");
+      if (j.ok) f.reset();
+    } catch { m.textContent = "Network error. Try again."; }
+  });
+</script>
+</body>
+</html>
