@@ -20,6 +20,7 @@
 
 (require 'exo-core)
 (require 'exo-input)
+(declare-function exo-voice-utterance->event "exo-voice")
 
 (defgroup exo-bridge nil
   "Socket bridge for external input drivers."
@@ -31,8 +32,11 @@
   "Path of the input bridge Unix socket."
   :type 'file)
 
-(defcustom exo-bridge-allowed-kinds '(text keys gesture command)
-  "Event kinds external drivers may send."
+(defcustom exo-bridge-allowed-kinds '(text keys gesture command utterance)
+  "Event kinds external drivers may send.
+`utterance' is a spoken transcript transcribed elsewhere (e.g. on your
+laptop by bin/exo-remote voice); it gets the same command-word parsing
+as local voice input."
   :type '(repeat symbol))
 
 (defvar exo-bridge--server nil "Listening server process.")
@@ -44,6 +48,10 @@
     (cond ((null obj) (process-send-string proc "{\"ok\":false,\"error\":\"bad json\"}\n"))
           ((not (memq kind exo-bridge-allowed-kinds))
            (process-send-string proc "{\"ok\":false,\"error\":\"kind not allowed\"}\n"))
+          ((eq kind 'utterance)
+           (require 'exo-voice)
+           (exo-input-emit (exo-voice-utterance->event (format "%s" (plist-get obj :value))))
+           (process-send-string proc "{\"ok\":true}\n"))
           (t (exo-input-emit obj)
              (process-send-string proc "{\"ok\":true}\n")))))
 

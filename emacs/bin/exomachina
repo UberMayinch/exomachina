@@ -1,4 +1,89 @@
 #!/bin/sh
-# Launch Emacs with the exomachina distribution (needs Emacs 29+).
+# exomachina launcher (needs Emacs 29+).
+#
+#   exomachina [--vault DIR] [EMACS-ARGS...]   open Emacs (GUI, or -nw for terminal)
+#   exomachina [--vault DIR] start             headless: background daemon, keeps
+#                                              running after you log out / ssh drops
+#   exomachina [--vault DIR] attach            terminal UI on the daemon (starts it)
+#   exomachina status | stop
+#   exomachina send MODALITY KIND VALUE        input event to the daemon (or `send -`)
+#
+# The vault is where memory, chord stats, feedback and your self layer live.
+# Order: --vault, then $EXO_VAULT, then $XDG_DATA_HOME/exomachina.
+#
+# Per-machine settings go in ${XDG_CONFIG_HOME:-~/.config}/exomachina/env
+# (shell syntax), e.g.
+#   EXO_VAULT=/srv/me/vault
+#   EXO_EMACS=$HOME/emacs/src/emacs
+#   EXO_NAME=exomachina          # daemon name, one per vault
+set -e
 here=$(cd "$(dirname "$0")/.." && pwd)
-exec "${EXO_EMACS:-emacs}" --init-directory="$here" "$@"
+conf="${XDG_CONFIG_HOME:-$HOME/.config}/exomachina/env"
+# shellcheck disable=SC1090
+if [ -f "$conf" ]; then set -a; . "$conf"; set +a; fi
+[ -d "$HOME/.local/bin" ] && PATH="$HOME/.local/bin:$PATH"   # uv, user-local ollama
+export PATH
+
+if [ "$1" = "--vault" ]; then
+  [ -n "$2" ] || { echo "exomachina: --vault needs a directory" >&2; exit 2; }
+  EXO_VAULT=$2; shift 2
+fi
+if [ -n "$EXO_VAULT" ]; then
+  mkdir -p "$EXO_VAULT" && chmod 700 "$EXO_VAULT"
+  EXO_VAULT=$(cd "$EXO_VAULT" && pwd)
+  export EXO_VAULT
+fi
+
+emacs=${EXO_EMACS:-emacs}
+name=${EXO_NAME:-exomachina}
+client=${EXO_EMACSCLIENT:-}
+if [ -z "$client" ]; then
+  d=$(dirname "$(command -v "$emacs" || echo "$emacs")")
+  for c in "$d/emacsclient" "$d/../lib-src/emacsclient"; do
+    [ -x "$c" ] && client=$c && break
+  done
+  : "${client:=emacsclient}"
+fi
+
+ensure_ollama() {
+  host=${OLLAMA_HOST:-http://localhost:11434}
+  case $host in http*) ;; *) host=http://$host ;; esac
+  command -v ollama >/dev/null 2>&1 || return 0
+  curl -s -m 1 "$host/api/version" >/dev/null 2>&1 && return 0
+  state="${XDG_STATE_HOME:-$HOME/.local/state}/exomachina"
+  mkdir -p "$state"
+  nohup ollama serve >"$state/ollama.log" 2>&1 </dev/null &
+}
+
+running() { "$client" -s "$name" --eval t >/dev/null 2>&1; }
+
+start() {
+  if running; then return 0; fi
+  ensure_ollama
+  echo "exomachina: starting headless daemon '$name' (vault: ${EXO_VAULT:-default})" >&2
+  "$emacs" --init-directory="$here" --daemon="$name"
+}
+
+case $1 in
+  start) start ;;
+  attach)
+    start
+    exec "$client" -s "$name" -t ;;
+  status)
+    if running; then
+      "$client" -s "$name" --eval \
+        '(format "running: vault %s, memories %d, sidecar %s, bridge %s"
+                 exo-data-directory (length (exo-memory-load))
+                 (if (bound-and-true-p exo-memory--sidecar-ready) "ready" "idle")
+                 exo-bridge-socket)'
+    else echo "not running"; exit 1; fi ;;
+  stop)
+    running && "$client" -s "$name" --eval '(kill-emacs)' >/dev/null 2>&1 || true
+    echo "stopped" ;;
+  send)
+    shift
+    exec "$here/bin/exo-send" "$@" ;;
+  *)
+    ensure_ollama
+    exec "$emacs" --init-directory="$here" "$@" ;;
+esac

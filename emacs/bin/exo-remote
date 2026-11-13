@@ -1,0 +1,148 @@
+#!/usr/bin/env python3
+"""exo-remote: run exomachina headless on another machine over SSH.
+
+Everything stays on HOST: the vault (memory, chords, feedback, self
+layer), the models, the agent.  Your machine only carries the terminal,
+and, for voice, the microphone and local speech-to-text.
+
+  exo-remote HOST setup [--vault DIR] [--emacs PATH]
+      copy the distribution to HOST:~/.exomachina, write HOST's
+      ~/.config/exomachina/env (vault location, emacs path), check deps
+  exo-remote HOST pull            pull the Ollama models on HOST
+  exo-remote HOST [attach]        start headless if needed, open the UI
+  exo-remote HOST start|status|stop
+  exo-remote HOST send MODALITY KIND VALUE   input event to the remote
+  exo-remote HOST voice           record here, transcribe here, send
+                                  the text (commands like "computer
+                                  save" work); Enter to stop
+
+HOST is anything ssh accepts (user@host, an ~/.ssh/config alias).
+The daemon keeps running after you disconnect; attach again any time.
+Env: EXO_SSH (default "ssh"), EXO_REMOTE_DIR (default ~/.exomachina).
+"""
+import json
+import os
+import shlex
+import subprocess
+import sys
+import tempfile
+
+HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+SSH = shlex.split(os.environ.get("EXO_SSH", "ssh"))
+RDIR = os.environ.get("EXO_REMOTE_DIR", "~/.exomachina")
+MODELS = ["qwen3:8b", "qwen2.5-coder:1.5b"]
+EXCLUDE = ["elpa/", "eln-cache/", "auto-save-list/", "transient/", "history",
+           "recentf", "*.elc", "__pycache__/", "org-persist/"]
+
+
+def rpath(p):
+    """Quote a remote path but let a leading ~ expand."""
+    if p.startswith("~/"):
+        return '"$HOME"/' + shlex.quote(p[2:])
+    return shlex.quote(p)
+
+
+def ssh(host, cmd, tty=False, **kw):
+    return subprocess.run(SSH + (["-t"] if tty else []) + [host, cmd], **kw)
+
+
+def launcher(host, args, tty=False):
+    cmd = " ".join([rpath(RDIR + "/bin/exomachina")] + [shlex.quote(a) for a in args])
+    return ssh(host, cmd, tty=tty).returncode
+
+
+def setup(host, opts):
+    print(f"exo-remote: copying distribution to {host}:{RDIR}", flush=True)
+    rsync = ["rsync", "-a", "--delete", "-e", " ".join(map(shlex.quote, SSH))]
+    rsync += [f"--exclude={e}" for e in EXCLUDE]
+    subprocess.run(rsync + [HERE + "/", f"{host}:{RDIR}/"], check=True)
+    env_lines = []
+    if opts.get("vault"):
+        env_lines.append(f"EXO_VAULT={shlex.quote(opts['vault'])}")
+    if opts.get("emacs"):
+        env_lines.append(f"EXO_EMACS={shlex.quote(opts['emacs'])}")
+    if env_lines:
+        # Replace only the keys we set; keep anything else the user wrote.
+        keys = "|".join(l.split("=")[0] for l in env_lines)
+        body = "\n".join(env_lines)
+        ssh(host, f'''set -e; d="${{XDG_CONFIG_HOME:-$HOME/.config}}/exomachina"
+mkdir -p "$d"; touch "$d/env"; chmod 600 "$d/env"
+grep -Ev '^({keys})=' "$d/env" > "$d/env.new" || true
+cat >> "$d/env.new" <<'EXO_EOF'
+{body}
+EXO_EOF
+mv "$d/env.new" "$d/env"; echo "wrote $d/env"''', check=True)
+    sys.stdout.flush()
+    check = r'''
+f="${XDG_CONFIG_HOME:-$HOME/.config}/exomachina/env"
+if [ -f "$f" ]; then set -a; . "$f"; set +a; fi
+PATH="$HOME/.local/bin:$PATH"
+e=${EXO_EMACS:-emacs}
+v=$("$e" --version 2>/dev/null | head -1); echo "emacs   ${v:-MISSING (need 29+; set it with: exo-remote HOST setup --emacs PATH)}"
+printf 'uv      '; uv --version 2>/dev/null || echo "missing (memory sidecar + voice need it: curl -LsSf https://astral.sh/uv/install.sh | sh)"
+printf 'ollama  '; ollama --version 2>/dev/null | tail -1 || echo "missing (agent + completion need it)"
+printf 'vault   %s\n' "${EXO_VAULT:-${XDG_DATA_HOME:-$HOME/.local/share}/exomachina (default)}"
+'''
+    ssh(host, check)
+    print(f"next: exo-remote {host} pull   then   exo-remote {host}")
+
+
+def send_events(host, events):
+    cmd = rpath(RDIR + "/bin/exo-send") + " -"
+    data = "".join(json.dumps(e) + "\n" for e in events)
+    r = ssh(host, cmd, input=data, text=True, capture_output=True)
+    sys.stdout.write(r.stdout)
+    sys.stderr.write(r.stderr)
+    return r.returncode
+
+
+def voice(host):
+    wav = tempfile.NamedTemporaryFile(suffix=".wav", delete=False).name
+    try:
+        rec = subprocess.Popen(["arecord", "-q", "-f", "S16_LE", "-r", "16000", "-c", "1",
+                                "-t", "wav", wav])
+        input("● listening… Enter to stop ")
+        rec.terminate()
+        rec.wait()
+        out = subprocess.run([os.path.join(HERE, "bin", "exo-transcribe"), wav],
+                             capture_output=True, text=True)
+        text = out.stdout.strip()
+        if not text:
+            print("heard nothing", out.stderr[-300:], file=sys.stderr)
+            return 1
+        print(f"» {text}")
+        return send_events(host, [{"modality": "voice", "kind": "utterance", "value": text}])
+    finally:
+        os.unlink(wav)
+
+
+def main(argv):
+    if len(argv) < 2 or argv[1] in ("-h", "--help"):
+        sys.exit(__doc__)
+    host, cmd, rest = argv[1], (argv[2] if len(argv) > 2 else "attach"), argv[3:]
+    if cmd == "setup":
+        opts, i = {}, 0
+        while i < len(rest):
+            if rest[i] in ("--vault", "--emacs") and i + 1 < len(rest):
+                opts[rest[i][2:]] = rest[i + 1]
+                i += 2
+            else:
+                sys.exit(f"exo-remote: unknown setup option {rest[i]}")
+        return setup(host, opts)
+    if cmd == "pull":
+        return ssh(host, 'PATH="$HOME/.local/bin:$PATH"; ' +
+                   "; ".join(f"ollama pull {m}" for m in MODELS), tty=True).returncode
+    if cmd in ("attach", "start", "status", "stop"):
+        return launcher(host, rest + [cmd] if rest[:1] == ["--vault"] else [cmd] + rest,
+                        tty=(cmd == "attach"))
+    if cmd == "send":
+        if len(rest) != 3:
+            sys.exit("usage: exo-remote HOST send MODALITY KIND VALUE")
+        return send_events(host, [dict(zip(("modality", "kind", "value"), rest))])
+    if cmd == "voice":
+        return voice(host)
+    sys.exit(f"exo-remote: unknown command {cmd}\n\n{__doc__}")
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv) or 0)

@@ -186,6 +186,46 @@
       (exo-bridge-stop)
       (delete-directory dir t))))
 
+;; Voice transcribed on another machine (bin/exo-remote voice) arrives as
+;; an utterance and gets the same command-word parsing as local voice.
+(ert-deftest exo-test-bridge-utterance ()
+  (let* ((dir (make-temp-file "exo-sock-" t))
+         (exo-bridge-socket (expand-file-name "s/input.sock" dir))
+         (got nil)
+         (exo-input-event-functions (list (lambda (e) (push e got) t)))
+         (reply ""))
+    (unwind-protect
+        (progn
+          (exo-bridge-start)
+          (let ((c (make-network-process :name "exo-test-client" :family 'local
+                                         :service exo-bridge-socket :noquery t
+                                         :filter (lambda (_ s) (setq reply (concat reply s))))))
+            (process-send-string
+             c (concat "{\"modality\":\"voice\",\"kind\":\"utterance\",\"value\":\"Computer save.\"}\n"
+                       "{\"modality\":\"voice\",\"kind\":\"utterance\",\"value\":\"hello there\"}\n"))
+            (with-timeout (3 nil)
+              (while (< (cl-count ?\n reply) 2) (accept-process-output nil 0.05)))
+            (delete-process c))
+          (setq got (nreverse got))
+          (should (equal (mapcar (lambda (e) (plist-get e :kind)) got) '(command text)))
+          (should (eq (plist-get (car got) :value) 'save-buffer))
+          (should (equal (plist-get (cadr got) :value) "hello there")))
+      (exo-bridge-stop)
+      (delete-directory dir t))))
+
+(ert-deftest exo-test-vault-from-env ()
+  "EXO_VAULT picks the data directory (checked in a fresh Emacs)."
+  (let* ((vault (make-temp-file "exo-vault-" t))
+         (process-environment (cons (concat "EXO_VAULT=" vault) process-environment))
+         (out (with-output-to-string
+                (call-process (expand-file-name invocation-name invocation-directory)
+                              nil standard-output nil "-Q" "--batch"
+                              "-L" (expand-file-name "../lisp" exo-test--dir)
+                              "--eval" "(progn (require 'exo-core) (princ exo-data-directory))"))))
+    (unwind-protect
+        (should (equal (string-trim out) (file-name-as-directory vault)))
+      (delete-directory vault t))))
+
 ;;;; scan
 
 (ert-deftest exo-test-scan-walks-keymap ()

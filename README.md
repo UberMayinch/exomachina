@@ -88,7 +88,7 @@ with you.
     logging off, set `exo-inline-record-feedback`.
 
 ```sh
-emacs/bin/exomachina                 # EXO_EMACS=/path/to/emacs if not on PATH (29+)
+emacs/bin/exomachina                 # GUI; -nw for terminal; --vault DIR; EXO_EMACS if not on PATH
 ollama pull qwen3:8b                 # chat  (exo-agent-chat-model)
 ollama pull qwen2.5-coder:1.5b       # inline FIM (exo-inline-model)
 emacs/bin/exo-embed                  # optional pre-warm: first run fetches torch + weights (~4GB)
@@ -96,8 +96,32 @@ ollama pull embeddinggemma-2         # only for (setq exo-memory-backend 'ollama
 emacs/bin/exo-send bci gesture scan  # drive it from any device
 ```
 
-Data lives in `$XDG_DATA_HOME/exomachina/` and never in the repo. It isn't
-encrypted at rest yet; encryption arrives with the vault (roadmap step 1).
+**The vault.** Memory, chord stats, feedback, settings and your self layer
+all live in one directory, owner-only and never in the repo. You choose
+where it lives with `--vault DIR`, `EXO_VAULT`, or
+`~/.config/exomachina/env`; the default is `$XDG_DATA_HOME/exomachina/`.
+It isn't encrypted at rest yet; encryption arrives with roadmap step 1.
+
+### Headless, on another machine
+
+Run exomachina on a server so the vault, the models and the agent all
+live there. Your laptop only carries the terminal, and the mic if you use
+voice.
+
+```sh
+emacs/bin/exo-remote myserver setup --vault /data/me/vault  # copy dist, write the server's env, check deps
+emacs/bin/exo-remote myserver pull                          # Ollama models on the server
+emacs/bin/exo-remote myserver                               # attach (starts the headless daemon)
+emacs/bin/exo-remote myserver voice                         # speak here, transcribed here, text sent there
+emacs/bin/exo-remote myserver send pen gesture undo         # any device event
+emacs/bin/exo-remote myserver status | stop
+```
+
+The daemon keeps running after you disconnect, so `C-x C-c` just closes
+your terminal frame. On the server itself, `bin/exomachina start|attach|status|stop`
+do the same. The server needs Emacs 29+, Ollama for the agent and uv for
+memory. Set `EXO_EMACS` in its env file if Emacs isn't on PATH. If the
+server's logind kills user processes at logout, run `loginctl enable-linger`.
 
 Run the tests with:
 

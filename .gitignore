@@ -12,4 +12,5 @@ emacs/auto-save-list/
 emacs/transient/
 emacs/history
 emacs/recentf
+emacs/org-persist/
 emacs/**/*.elc

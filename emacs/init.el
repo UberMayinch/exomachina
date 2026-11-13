@@ -29,6 +29,7 @@
 ;; Your settings and self layer live outside the repo.
 (require 'exo-core)
 (setq custom-file (exo-data-file "custom.el"))
+(unless (file-exists-p custom-file) (exo-write-file custom-file ""))  ; owner-only
 (when (file-exists-p custom-file) (load custom-file nil t))
 
 (setq initial-scratch-message

@@ -17,10 +17,13 @@
   :prefix "exo-")
 
 (defcustom exo-data-directory
-  (expand-file-name "exomachina/"
-                    (or (getenv "XDG_DATA_HOME") "~/.local/share/"))
-  "Directory for memory, chord stats, feedback and your self layer.
-Lives outside the repo.  Files here are created owner-only."
+  (file-name-as-directory
+   (expand-file-name (or (getenv "EXO_VAULT")
+                         (expand-file-name "exomachina/"
+                                           (or (getenv "XDG_DATA_HOME") "~/.local/share/")))))
+  "The vault: memory, chord stats, feedback, settings and your self layer.
+Set with $EXO_VAULT (or `bin/exomachina --vault DIR'); defaults to
+$XDG_DATA_HOME/exomachina/.  Lives outside the repo, created owner-only."
   :type 'directory)
 
 (defcustom exo-ollama-host "http://localhost:11434"
