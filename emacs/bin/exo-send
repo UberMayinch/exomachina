@@ -1,0 +1,37 @@
+#!/usr/bin/env python3
+"""Send input events to exomachina over its Unix socket.
+
+Reference client for pen / BCI / MIDI / gesture drivers.
+
+  exo-send pen gesture circle
+  exo-send bci gesture select
+  exo-send voice text "hello there"
+  my-driver | exo-send -          # JSON lines on stdin, one event each
+"""
+import json
+import os
+import socket
+import sys
+
+SOCK = os.environ.get("EXO_SOCKET") or os.path.join(
+    os.environ.get("XDG_RUNTIME_DIR") or "/tmp", "exomachina", "input.sock")
+
+
+def main(argv):
+    if len(argv) == 2 and argv[1] == "-":
+        lines = (l for l in sys.stdin if l.strip())
+    elif len(argv) == 4:
+        lines = [json.dumps({"modality": argv[1], "kind": argv[2], "value": argv[3]})]
+    else:
+        sys.exit(__doc__)
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
+        s.connect(SOCK)
+        f = s.makefile("rw")
+        for line in lines:
+            f.write(line.strip() + "\n")
+            f.flush()
+            print(f.readline().strip())
+
+
+if __name__ == "__main__":
+    main(sys.argv)

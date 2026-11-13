@@ -1,0 +1,51 @@
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.10"
+# dependencies = ["faster-whisper", "numpy"]
+# ///
+"""exo-transcribe: local speech-to-text for exomachina voice input.
+
+  exo-transcribe FILE.wav  ->  transcript on stdout
+
+Runs faster-whisper on this machine; audio never leaves it.  The model
+(default small.en, ~500MB) downloads once to the Hugging Face cache.
+
+  EXO_STT_MODEL=large-v3-turbo   bigger, better, slower
+  EXO_STT_DEVICE=cuda            default cpu (leaves the GPU to Ollama)
+"""
+import os
+import sys
+import wave
+
+
+def read_wav(path):
+    """16-bit PCM wav -> float32 mono at its own rate (arecord gives 16k mono).
+    Read here because faster-whisper's PyAV decoder breaks on newer av."""
+    import numpy as np
+
+    with wave.open(path) as w:
+        if w.getsampwidth() != 2:
+            raise SystemExit(f"exo-transcribe: need 16-bit PCM wav: {path}")
+        rate, ch = w.getframerate(), w.getnchannels()
+        a = np.frombuffer(w.readframes(w.getnframes()), dtype=np.int16).astype(np.float32) / 32768
+    if ch > 1:
+        a = a.reshape(-1, ch).mean(axis=1)
+    if rate != 16000:
+        a = np.interp(np.arange(0, len(a), rate / 16000), np.arange(len(a)), a).astype(np.float32)
+    return a
+
+
+def main():
+    if len(sys.argv) != 2:
+        sys.exit(__doc__)
+    from faster_whisper import WhisperModel
+
+    device = os.environ.get("EXO_STT_DEVICE", "cpu")
+    model = WhisperModel(os.environ.get("EXO_STT_MODEL", "small.en"), device=device,
+                         compute_type="int8" if device == "cpu" else "float16")
+    segments, _ = model.transcribe(read_wav(sys.argv[1]), beam_size=1, vad_filter=True)
+    print(" ".join(s.text.strip() for s in segments).strip())
+
+
+if __name__ == "__main__":
+    main()

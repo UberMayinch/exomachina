@@ -1,0 +1,156 @@
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.10"
+# dependencies = [
+#   "sentence-transformers",
+#   "transformers",
+#   "torch",
+#   "torchvision",
+#   "pillow",
+#   "librosa",
+#   "torchcodec",
+# ]
+# ///
+"""exo-embed: local embedding sidecar for exomachina memory.
+
+Serves EmbeddingGemma 2 (google/embeddinggemma-2, Apache 2.0), which maps
+text, images, audio and video into one 768-d space, so a sketch, a voice
+memo, a clip and a sentence about them land near each other.
+
+Speaks Ollama's /api/embed shape so Emacs needs no special client:
+
+  POST /api/embed {"model": "...", "input": ["text", {"image": "/p.png"},
+                                             {"audio": "/memo.wav"},
+                                             {"video": "/clip.mp4"}]}
+  -> {"model": "...", "embeddings": [[...768 floats...], ...]}
+
+Text arrives already prefixed by Emacs ("task: search result | query: ..."
+or "title: none | text: ..."); media is passed without a prefix, as the
+model card says.  Listens on 127.0.0.1 only.  Files are read from local
+paths and never copied anywhere.
+
+  bin/exo-embed                 # first run downloads deps + weights (~GBs)
+  bin/exo-embed --device cpu
+  python3 bin/exo-embed --fake  # plumbing test: no deps, fake vectors
+"""
+import argparse
+import hashlib
+import json
+import os
+import sys
+import threading
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+MODEL_ID = "google/embeddinggemma-2"
+PLACEHOLDER = {"image": "<|image|>", "audio": "<|audio|>", "video": "<|video|>"}
+
+
+def media_input(item):
+    """Turn {"image": path} etc. into the model's interleaved-input dict."""
+    for kind, token in PLACEHOLDER.items():
+        if kind in item:
+            path = os.path.expanduser(item[kind])
+            if not os.path.isfile(path):
+                raise ValueError(f"no such file: {path}")
+            # Model card example: "image" takes a list, "video" a single path.
+            # "audio" is not shown on the card; single path assumed.
+            return {"text": token, kind: [path] if kind == "image" else path}
+    raise ValueError(f"unknown input item: {item!r}")
+
+
+class Encoder:
+    def __init__(self, model_id, device):
+        import torch
+        from sentence_transformers import SentenceTransformer
+
+        if device is None:
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+        # Model card: bf16 or fp32, never fp16 (NaNs).  bf16 halves VRAM.
+        bf16 = device == "cuda" and torch.cuda.is_bf16_supported()
+        dtype = torch.bfloat16 if bf16 else torch.float32
+        self.model = SentenceTransformer(model_id, device=device,
+                                         model_kwargs={"torch_dtype": dtype})
+        self.lock = threading.Lock()
+
+    def encode(self, x):
+        return self.model.encode(x, normalize_embeddings=True)
+
+    def embed(self, items):
+        out = [None] * len(items)
+        texts = [(i, s) for i, s in enumerate(items) if isinstance(s, str)]
+        with self.lock:
+            if texts:
+                vecs = self.encode([s for _, s in texts])
+                for (i, _), v in zip(texts, vecs):
+                    out[i] = [float(x) for x in v]
+            for i, item in enumerate(items):
+                if not isinstance(item, str):
+                    v = self.encode(media_input(item))
+                    out[i] = [float(x) for x in v]
+        return out
+
+
+class FakeEncoder:
+    """Deterministic 8-d vectors from a hash; for testing the plumbing."""
+
+    def embed(self, items):
+        out = []
+        for item in items:
+            if not isinstance(item, str):
+                media_input(item)  # validate like the real one
+            h = hashlib.sha256(json.dumps(item, sort_keys=True).encode()).digest()
+            out.append([b / 255.0 for b in h[:8]])
+        return out
+
+
+def make_handler(encoder, model_name):
+    class Handler(BaseHTTPRequestHandler):
+        def log_message(self, fmt, *args):
+            pass
+
+        def reply(self, code, obj):
+            data = json.dumps(obj).encode()
+            self.send_response(code)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+
+        def do_GET(self):
+            self.reply(200, {"ok": True, "model": model_name})
+
+        def do_POST(self):
+            if self.path != "/api/embed":
+                return self.reply(404, {"error": "not found"})
+            try:
+                body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+                items = body.get("input", [])
+                if isinstance(items, (str, dict)):
+                    items = [items]
+                vecs = encoder.embed(items)
+            except Exception as e:  # report, keep serving
+                return self.reply(400, {"error": str(e)})
+            self.reply(200, {"model": model_name, "embeddings": vecs})
+
+    return Handler
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
+    ap.add_argument("--port", type=int, default=int(os.environ.get("EXO_EMBED_PORT", 11435)))
+    ap.add_argument("--model", default=MODEL_ID)
+    ap.add_argument("--device", default=None, help="cuda, cpu, mps (default: auto)")
+    ap.add_argument("--fake", action="store_true", help="no model; fake vectors")
+    args = ap.parse_args()
+
+    encoder = FakeEncoder() if args.fake else Encoder(args.model, args.device)
+    srv = ThreadingHTTPServer(("127.0.0.1", args.port), make_handler(encoder, args.model))
+    print(f"exo-embed: {args.model} on 127.0.0.1:{srv.server_port}", flush=True)
+    try:
+        srv.serve_forever()
+    except KeyboardInterrupt:
+        pass
+
+
+if __name__ == "__main__":
+    sys.exit(main())

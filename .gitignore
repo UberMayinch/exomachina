@@ -4,3 +4,12 @@ node_modules/
 .env*
 *.log
 .DS_Store
+
+# emacs distribution: installed packages and runtime state stay out of git
+emacs/elpa/
+emacs/eln-cache/
+emacs/auto-save-list/
+emacs/transient/
+emacs/history
+emacs/recentf
+emacs/**/*.elc

@@ -1,0 +1,4 @@
+#!/bin/sh
+# Launch Emacs with the exomachina distribution (needs Emacs 29+).
+here=$(cd "$(dirname "$0")/.." && pwd)
+exec "${EXO_EMACS:-emacs}" --init-directory="$here" "$@"
