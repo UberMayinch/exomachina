@@ -27,9 +27,14 @@
   :group 'exomachina)
 
 (defcustom exo-bridge-socket
-  (expand-file-name "exomachina/input.sock"
-                    (or (getenv "XDG_RUNTIME_DIR") temporary-file-directory))
-  "Path of the input bridge Unix socket."
+  (or (getenv "EXO_SOCKET")
+      (expand-file-name
+       (format "exomachina/run/%s@%s.input" (or (getenv "EXO_NAME") "exomachina")
+               (car (split-string (system-name) "\\.")))
+       (or (getenv "XDG_STATE_HOME") "~/.local/state")))
+  "Path of the input bridge Unix socket.
+Default matches bin/exomachina and bin/exo-send: a per-user 0700 directory
+that outlives login sessions (never /tmp, never $XDG_RUNTIME_DIR)."
   :type 'file)
 
 (defcustom exo-bridge-allowed-kinds '(text keys gesture command utterance)

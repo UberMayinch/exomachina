@@ -8,7 +8,8 @@ and, for voice, the microphone and local speech-to-text.
   exo-remote HOST setup [--vault DIR] [--emacs PATH]
       copy the distribution to HOST:~/.exomachina, write HOST's
       ~/.config/exomachina/env (vault location, emacs path), check deps
-  exo-remote HOST pull            pull the Ollama models on HOST
+  exo-remote HOST pull            on HOST: start Ollama, pull the models,
+                                  fetch the memory model (several GB, once)
   exo-remote HOST [attach]        start headless if needed, open the UI
   exo-remote HOST start|status|stop
   exo-remote HOST send MODALITY KIND VALUE   input event to the remote
@@ -30,7 +31,6 @@ import tempfile
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SSH = shlex.split(os.environ.get("EXO_SSH", "ssh"))
 RDIR = os.environ.get("EXO_REMOTE_DIR", "~/.exomachina")
-MODELS = ["qwen3:8b", "qwen2.5-coder:1.5b"]
 EXCLUDE = ["elpa/", "eln-cache/", "auto-save-list/", "transient/", "history",
            "recentf", "*.elc", "__pycache__/", "org-persist/"]
 
@@ -43,7 +43,11 @@ def rpath(p):
 
 
 def ssh(host, cmd, tty=False, **kw):
-    return subprocess.run(SSH + (["-t"] if tty else []) + [host, cmd], **kw)
+    """Run CMD under sh on HOST, whatever its login shell (fish, tcsh, ...).
+    Multi-line scripts go over stdin (sh -s); one-liners as sh -c."""
+    if "\n" in cmd and "input" not in kw and not tty:
+        return subprocess.run(SSH + [host, "sh -s"], input=cmd, text=True, **kw)
+    return subprocess.run(SSH + (["-t"] if tty else []) + [host, "sh -c " + shlex.quote(cmd)], **kw)
 
 
 def launcher(host, args, tty=False):
@@ -58,7 +62,12 @@ def setup(host, opts):
     subprocess.run(rsync + [HERE + "/", f"{host}:{RDIR}/"], check=True)
     env_lines = []
     if opts.get("vault"):
-        env_lines.append(f"EXO_VAULT={shlex.quote(opts['vault'])}")
+        v = opts["vault"]
+        home = os.path.expanduser("~")
+        if v.startswith(home + "/"):
+            print(f"note: your shell expanded ~ to {home}; on {host} that path is used "
+                  f"as-is. Quote it ('~/...') to mean the server's home.", file=sys.stderr)
+        env_lines.append("EXO_VAULT=" + (rpath(v) if v.startswith("~/") else shlex.quote(v)))
     if opts.get("emacs"):
         env_lines.append(f"EXO_EMACS={shlex.quote(opts['emacs'])}")
     if env_lines:
@@ -88,7 +97,8 @@ printf 'vault   %s\n' "${EXO_VAULT:-${XDG_DATA_HOME:-$HOME/.local/share}/exomach
 
 
 def send_events(host, events):
-    cmd = rpath(RDIR + "/bin/exo-send") + " -"
+    # Through the launcher, so the server's env file picks the socket.
+    cmd = rpath(RDIR + "/bin/exomachina") + " send -"
     data = "".join(json.dumps(e) + "\n" for e in events)
     r = ssh(host, cmd, input=data, text=True, capture_output=True)
     sys.stdout.write(r.stdout)
@@ -130,8 +140,7 @@ def main(argv):
                 sys.exit(f"exo-remote: unknown setup option {rest[i]}")
         return setup(host, opts)
     if cmd == "pull":
-        return ssh(host, 'PATH="$HOME/.local/bin:$PATH"; ' +
-                   "; ".join(f"ollama pull {m}" for m in MODELS), tty=True).returncode
+        return launcher(host, ["pull"], tty=True)
     if cmd in ("attach", "start", "status", "stop"):
         return launcher(host, rest + [cmd] if rest[:1] == ["--vault"] else [cmd] + rest,
                         tty=(cmd == "attach"))

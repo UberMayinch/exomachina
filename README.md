@@ -109,8 +109,8 @@ live there. Your laptop only carries the terminal, and the mic if you use
 voice.
 
 ```sh
-emacs/bin/exo-remote myserver setup --vault /data/me/vault  # copy dist, write the server's env, check deps
-emacs/bin/exo-remote myserver pull                          # Ollama models on the server
+emacs/bin/exo-remote myserver setup --vault '~/vault'      # copy dist, write the server's env, check deps
+emacs/bin/exo-remote myserver pull                          # on the server: models + memory weights (once)
 emacs/bin/exo-remote myserver                               # attach (starts the headless daemon)
 emacs/bin/exo-remote myserver voice                         # speak here, transcribed here, text sent there
 emacs/bin/exo-remote myserver send pen gesture undo         # any device event
@@ -122,6 +122,11 @@ your terminal frame. On the server itself, `bin/exomachina start|attach|status|s
 do the same. The server needs Emacs 29+, Ollama for the agent and uv for
 memory. Set `EXO_EMACS` in its env file if Emacs isn't on PATH. If the
 server's logind kills user processes at logout, run `loginctl enable-linger`.
+Sockets live in `~/.local/state/exomachina/run/` (0700, one per machine
+name), not in `$XDG_RUNTIME_DIR`, which disappears when your last SSH
+session closes. On clusters, pin one login node (round-robin aliases
+land you on another machine). Compute nodes only live as long as the
+scheduler job.
 
 Run the tests with:
 

@@ -13,8 +13,12 @@ import os
 import socket
 import sys
 
+# Same default as bin/exomachina and exo-bridge.el (per-user 0700 dir).
 SOCK = os.environ.get("EXO_SOCKET") or os.path.join(
-    os.environ.get("XDG_RUNTIME_DIR") or "/tmp", "exomachina", "input.sock")
+    os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state"),
+    "exomachina", "run",
+    "%s@%s.input" % (os.environ.get("EXO_NAME") or "exomachina",
+                     socket.gethostname().split(".")[0]))
 
 
 def main(argv):
