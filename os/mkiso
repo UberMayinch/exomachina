@@ -1,0 +1,32 @@
+#!/bin/bash
+# Runs inside an Arch container (see ./build).  /src = repo (read-only), /out = ISO output.
+set -euo pipefail
+pacman -Syu --noconfirm --needed archiso grub emacs-nox >/dev/null
+
+w=/tmp/exo; rm -rf "$w"; mkdir -p "$w"
+p=$w/profile
+cp -r /usr/share/archiso/configs/baseline "$p"
+sed -i '/^cloud-init$/d' "$p/packages.x86_64"     # waits for a cloud datasource at boot
+grep -v '^#' /src/os/packages >> "$p/packages.x86_64"
+cp -a /src/os/airootfs/. "$p/airootfs/"
+
+# The distribution, with its Emacs packages fetched and byte-compiled now
+# so first boot needs no network for the editor itself.
+d=$p/airootfs/home/exo/.exomachina
+mkdir -p "$d"
+tar -C /src/emacs --exclude=./elpa --exclude=./eln-cache --exclude=./transient \
+    --exclude=./auto-save-list --exclude=./org-persist --exclude=./history \
+    --exclude=./recentf --exclude='*.elc' --exclude=__pycache__ -cf - . | tar -C "$d" -xf -
+HOME=$w/home EXO_VAULT=$w/vault XDG_STATE_HOME=$w/state \
+  emacs --batch --init-directory="$d" -l "$d/early-init.el" -l "$d/init.el" 2>&1 | grep -iE 'error|exo:' || true
+ls "$d/elpa" | grep -q '^evil-[0-9]' || { echo "mkiso: Emacs packages did not install" >&2; exit 1; }
+rm -rf "$d/eln-cache" "$d/transient" "$d/auto-save-list"
+
+sed -i -e 's/^iso_name=.*/iso_name="exomachina"/' \
+       -e 's/^iso_application=.*/iso_application="exomachina"/' \
+       -e 's/^iso_publisher=.*/iso_publisher="Thinking Humans"/' \
+       -e 's|^file_permissions=(|&\n  ["/home/exo/"]="1000:1000:u=rwX,go="\n  ["/home/exo/.exomachina/bin/"]="1000:1000:700"\n  ["/usr/local/bin/exomachina-session"]="0:0:755"|' \
+       "$p/profiledef.sh"
+
+mkarchiso -v -w "$w/work" -o /out "$p"
+chown -R "${HOST_UID:-0}:${HOST_GID:-0}" /out

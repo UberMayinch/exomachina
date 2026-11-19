@@ -1,0 +1,12 @@
+#!/bin/sh
+# Build the exomachina ISO in an Arch container (works from any Linux with Docker).
+#   os/build            -> os/out/exomachina-YYYY.MM.DD-x86_64.iso
+# --privileged: mkarchiso mounts proc/sys inside the image it builds.
+set -e
+repo=$(cd "$(dirname "$0")/.." && pwd)
+out=$repo/os/out
+mkdir -p "$out"
+docker pull -q archlinux:latest >/dev/null
+docker run --rm --privileged -v "$repo:/src:ro" -v "$out:/out" \
+  -e HOST_UID="$(id -u)" -e HOST_GID="$(id -g)" archlinux:latest bash /src/os/mkiso
+ls -lh "$out"/*.iso

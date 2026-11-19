@@ -24,15 +24,29 @@ without consent and is never used to train anyone else's model.
 3. **Grow.** Continual post-training on the artist's context (LoRA / adapter
    per artist), with eval gates so that growth doesn't mean drift.
 4. **RLNF.** Feedback from creative sessions fed back into training.
-5. **Interfaces.** Interaction modes native to each medium: music first, other
-   media after. The first one is an Emacs distribution (below) with a
-   modality-agnostic input model.
+5. **Interfaces.** A standalone computing environment that anyone can use
+   to extend their creativity on the fly, with interaction modes native to
+   each medium: music first, other media after. Today it is a bootable
+   Arch-based OS whose session is the Emacs-based environment (below).
+   Next, the core becomes a service any frontend can use.
 6. **Service.** The whole stack sold as a managed service, with the artist
    keeping their keys.
 
-## The editor: exomachina as an Emacs distribution
+## The machine: exomachina OS
 
-The first interface is a Lisp environment you and a local agent keep
+A minimal, Arch-based bootable image that starts straight into
+exomachina, full screen, with your vault on its own disk. Build it and
+try it in a VM:
+
+```sh
+os/build && os/run-vm
+```
+
+See [os/README.md](os/README.md).
+
+## The environment: Lisp, today on Emacs
+
+The first frontend is a Lisp environment you and a local agent keep
 shaping together.
 - **Homoiconic:** your input events, your adaptations and the agent's
   proposals are all Lisp data.
@@ -51,7 +65,8 @@ emacs/bin/exomachina pull && emacs/bin/exomachina
 ## Layout
 
 ```
-emacs/       the Emacs distribution (init.el, lisp/exo-*.el, bin/, test/)
+os/          bootable Arch-based image (archiso profile, build, run-vm)
+emacs/       the Emacs-based environment (init.el, lisp/exo-*.el, bin/, test/)
 site/        landing page + waitlist (Cloudflare Worker + D1)
 ```
 

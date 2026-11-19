@@ -1,0 +1,9 @@
+# Added to archiso's baseline profile.
+cage
+mesa
+emacs-wayland
+ttf-dejavu
+ollama
+uv
+python
+alsa-utils

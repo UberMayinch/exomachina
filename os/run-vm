@@ -1,0 +1,23 @@
+#!/bin/sh
+# Boot the ISO in QEMU/KVM with a persistent data disk.
+#   os/run-vm [ISO] [QEMU-ARGS...]   EXO_VM_MEM (default 8G), EXO_VM_CPUS (default 4)
+# The data disk (os/out/data.img, sparse 64G, label EXO_DATA) keeps your
+# vault, models and caches across reboots; delete it to start fresh.
+set -e
+out=$(cd "$(dirname "$0")" && pwd)/out
+if [ -f "${1:-}" ]; then iso=$1; shift
+else iso=$(ls -t "$out"/exomachina-*.iso 2>/dev/null | head -1); fi
+[ -f "$iso" ] || { echo "run-vm: no ISO; run os/build first" >&2; exit 1; }
+data=$out/data.img
+if [ ! -f "$data" ]; then
+  truncate -s 64G "$data"
+  mkfs.ext4 -q -L EXO_DATA -E root_owner=1000:1000 "$data"   # uid 1000 = exo in the image
+fi
+kvm=; [ -w /dev/kvm ] && kvm="-enable-kvm -cpu host"
+exec qemu-system-x86_64 $kvm -smp "${EXO_VM_CPUS:-4}" -m "${EXO_VM_MEM:-8G}" \
+  -cdrom "$iso" -boot d \
+  -drive file="$data",format=raw,if=virtio \
+  -nic user,model=virtio-net-pci \
+  -device virtio-vga -display "${EXO_VM_DISPLAY:-gtk}" \
+  -audiodev pa,id=snd -device intel-hda -device hda-duplex,audiodev=snd \
+  "$@"

@@ -1,0 +1,26 @@
+#!/bin/sh
+# Boot straight into exomachina, full screen (cage: one app, no desktop).
+dist=$HOME/.exomachina
+data=/var/lib/exomachina
+if mountpoint -q "$data" && [ -w "$data" ]; then
+  persist=1
+else
+  persist=
+  data=$HOME/.local/share/exomachina-live
+  echo "exomachina: no writable EXO_DATA disk; running from RAM, nothing is kept" >&2
+fi
+mkdir -p "$data/vault" "$data/ollama" "$data/cache"
+chmod 700 "$data/vault"
+export EXO_VAULT="$data/vault" OLLAMA_MODELS="$data/ollama" XDG_CACHE_HOME="$data/cache"
+
+# First boot with a data disk: fetch models in the background; the editor
+# starts now and the agent comes online when the download finishes.
+if [ -n "$persist" ] && [ ! -e "$data/.pulled" ]; then
+  ( "$dist/bin/exomachina" pull && touch "$data/.pulled" ) >"$data/pull.log" 2>&1 &
+fi
+
+# VMs rarely have a GPU that wlroots can render with; use the software renderer.
+if systemd-detect-virt -q; then
+  export WLR_RENDERER=${WLR_RENDERER:-pixman} WLR_NO_HARDWARE_CURSORS=1
+fi
+exec cage -s -- "$dist/bin/exomachina"
